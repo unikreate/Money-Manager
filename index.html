@@ -1,20 +1,17 @@
-<!DOCTYPE html>
+                    <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   
-  <!-- APP NAME -->
   <title>Unikreate Money Manager</title>
   
-  <!-- THESE TAGS MAKE IT ACT LIKE A REAL APP -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Unikreate">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#4f46e5">
   
-  <!-- APP ICON -->
   <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/2933/2933116.png">
   <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/2933/2933116.png">
 
@@ -25,7 +22,6 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   
   <style>
-    /* Hides the scrollbar for a cleaner app look */
     ::-webkit-scrollbar { display: none; }
     body { -ms-overflow-style: none; scrollbar-width: none; }
   </style>
@@ -37,42 +33,64 @@
     const { useState, useMemo, useEffect } = React;
 
     function App() {
+      // Load Data
       const [transactions, setTransactions] = useState(() => JSON.parse(localStorage.getItem('unikreate_trade_tracker')) || []);
       const [dailyExpenses, setDailyExpenses] = useState(() => JSON.parse(localStorage.getItem('unikreate_daily_expenses')) || []);
       const [dues, setDues] = useState(() => JSON.parse(localStorage.getItem('unikreate_dues_tracker')) || []);
+      const [personalEntries, setPersonalEntries] = useState(() => JSON.parse(localStorage.getItem('unikreate_personal_ledger')) || []);
 
+      // UI States
       const [activeFormTab, setActiveFormTab] = useState('trade');
       const [activeFeedTab, setActiveFeedTab] = useState('trades');
 
-      // Added expensePerPc to the form state
+      // Forms
       const [tradeForm, setTradeForm] = useState({ productName: '', quantity: 1, buyingPrice: '', sellingPrice: '', expensePerPc: '', date: new Date().toISOString().split('T')[0] });
       const [expenseForm, setExpenseForm] = useState({ description: '', amount: '' });
       const [dueForm, setDueForm] = useState({ personName: '', amount: '', type: 'take', date: new Date().toISOString().split('T')[0] });
+      const [personalForm, setPersonalForm] = useState({ description: '', amount: '', type: 'profit' });
 
+      // Auto Save
       useEffect(() => localStorage.setItem('unikreate_trade_tracker', JSON.stringify(transactions)), [transactions]);
       useEffect(() => localStorage.setItem('unikreate_daily_expenses', JSON.stringify(dailyExpenses)), [dailyExpenses]);
       useEffect(() => localStorage.setItem('unikreate_dues_tracker', JSON.stringify(dues)), [dues]);
+      useEffect(() => localStorage.setItem('unikreate_personal_ledger', JSON.stringify(personalEntries)), [personalEntries]);
 
-      const { totalRevenue, totalMoneyOut, netProfit, totalToTake, totalToGive } = useMemo(() => {
-        let rev = 0; let moneyOut = 0;
+      // Calculations
+      const { 
+        totalRevenue, totalBP, totalExp, netProfit, todayProfit, 
+        totalToTake, totalToGive, 
+        personalProfit, personalExpense, personalBalance 
+      } = useMemo(() => {
+        
+        // Business Variables
+        let rev = 0; let totalBuyingPrice = 0; let totalExpenses = 0; let moneyOut = 0;
+        let todayRev = 0; let todayCost = 0;
+        const todayStr = new Date().toISOString().split('T')[0];
         
         transactions.forEach(curr => {
           const qty = parseFloat(curr.quantity) || 1;
           const bp = parseFloat(curr.buyingPrice) || 0;
           const sp = parseFloat(curr.sellingPrice) || 0;
-          
-          // Handles both old data (expenses) and new data (expensePerPc)
           const oldBatchExp = parseFloat(curr.expenses) || 0; 
           const pcExp = parseFloat(curr.expensePerPc) || 0;
           
-          // Total Cost = (BuyPrice * Qty) + (ExpensePerPc * Qty) + OldBatchExpenses
-          const totalCost = (bp * qty) + (pcExp * qty) + oldBatchExp;
+          const itemBP = bp * qty;
+          const itemExp = (pcExp * qty) + oldBatchExp;
+          const itemCost = itemBP + itemExp;
+          const itemRev = sp * qty;
           
-          moneyOut += totalCost;
-          rev += (sp * qty);
+          totalBuyingPrice += itemBP; totalExpenses += itemExp; moneyOut += itemCost; rev += itemRev;
+
+          if (curr.date === todayStr || (curr.timestamp && curr.timestamp.startsWith(todayStr))) {
+            todayRev += itemRev; todayCost += itemCost;
+          }
         });
         
-        dailyExpenses.forEach(curr => { moneyOut += parseFloat(curr.amount) || 0; });
+        dailyExpenses.forEach(curr => { 
+          const expAmt = parseFloat(curr.amount) || 0;
+          totalExpenses += expAmt; moneyOut += expAmt;
+          if (curr.timestamp && curr.timestamp.startsWith(todayStr)) todayCost += expAmt;
+        });
         
         let toTake = 0; let toGive = 0;
         dues.forEach(d => {
@@ -80,9 +98,22 @@
           if (d.type === 'give') toGive += parseFloat(d.amount) || 0;
         });
 
-        return { totalRevenue: rev, totalMoneyOut: moneyOut, netProfit: rev - moneyOut, totalToTake: toTake, totalToGive: toGive };
-      }, [transactions, dailyExpenses, dues]);
+        // Personal Variables (Amit's Wallet)
+        let pProfit = 0; let pExpense = 0;
+        personalEntries.forEach(p => {
+          if (p.type === 'profit') pProfit += parseFloat(p.amount) || 0;
+          if (p.type === 'expense') pExpense += parseFloat(p.amount) || 0;
+        });
 
+        return { 
+          totalRevenue: rev, totalBP: totalBuyingPrice, totalExp: totalExpenses,
+          netProfit: rev - moneyOut, todayProfit: todayRev - todayCost,
+          totalToTake: toTake, totalToGive: toGive,
+          personalProfit: pProfit, personalExpense: pExpense, personalBalance: pProfit - pExpense
+        };
+      }, [transactions, dailyExpenses, dues, personalEntries]);
+
+      // Inputs & Submits
       const handleInput = (e, setter) => {
         const { name, value } = e.target;
         setter(prev => ({ ...prev, [name]: value }));
@@ -91,14 +122,7 @@
       const handleTradeSubmit = (e) => {
         e.preventDefault();
         if (!tradeForm.productName || !tradeForm.buyingPrice || !tradeForm.sellingPrice) return;
-        const newTx = { 
-          ...tradeForm, 
-          id: crypto.randomUUID(), 
-          quantity: parseFloat(tradeForm.quantity) || 1, 
-          buyingPrice: parseFloat(tradeForm.buyingPrice), 
-          sellingPrice: parseFloat(tradeForm.sellingPrice), 
-          expensePerPc: parseFloat(tradeForm.expensePerPc) || 0 
-        };
+        const newTx = { ...tradeForm, id: crypto.randomUUID(), quantity: parseFloat(tradeForm.quantity) || 1, buyingPrice: parseFloat(tradeForm.buyingPrice), sellingPrice: parseFloat(tradeForm.sellingPrice), expensePerPc: parseFloat(tradeForm.expensePerPc) || 0 };
         setTransactions([newTx, ...transactions]);
         setTradeForm(p => ({ ...p, productName: '', quantity: 1, buyingPrice: '', sellingPrice: '', expensePerPc: '' }));
         setActiveFeedTab('trades');
@@ -107,8 +131,7 @@
       const handleExpenseSubmit = (e) => {
         e.preventDefault();
         if (!expenseForm.description || !expenseForm.amount) return;
-        const newExp = { id: crypto.randomUUID(), description: expenseForm.description, amount: parseFloat(expenseForm.amount), timestamp: new Date().toISOString() };
-        setDailyExpenses([newExp, ...dailyExpenses]);
+        setDailyExpenses([{ id: crypto.randomUUID(), description: expenseForm.description, amount: parseFloat(expenseForm.amount), timestamp: new Date().toISOString() }, ...dailyExpenses]);
         setExpenseForm({ description: '', amount: '' });
         setActiveFeedTab('expenses');
       };
@@ -116,10 +139,17 @@
       const handleDueSubmit = (e) => {
         e.preventDefault();
         if (!dueForm.personName || !dueForm.amount) return;
-        const newDue = { id: crypto.randomUUID(), ...dueForm, amount: parseFloat(dueForm.amount) };
-        setDues([newDue, ...dues]);
+        setDues([{ id: crypto.randomUUID(), ...dueForm, amount: parseFloat(dueForm.amount) }, ...dues]);
         setDueForm(p => ({ ...p, personName: '', amount: '' }));
         setActiveFeedTab('dues');
+      };
+
+      const handlePersonalSubmit = (e) => {
+        e.preventDefault();
+        if (!personalForm.description || !personalForm.amount) return;
+        setPersonalEntries([{ id: crypto.randomUUID(), ...personalForm, amount: parseFloat(personalForm.amount), timestamp: new Date().toISOString() }, ...personalEntries]);
+        setPersonalForm(p => ({ ...p, description: '', amount: '' }));
+        setActiveFeedTab('personal');
       };
 
       const formatINR = (amt) => '₹' + amt.toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -127,34 +157,77 @@
 
       return (
         <div className="p-4 max-w-lg mx-auto space-y-4 pb-20">
-          <header className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center gap-4">
-            <img src="https://cdn-icons-png.flaticon.com/512/2933/2933116.png" className="w-10 h-10" alt="logo" />
+          <header className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex items-center gap-3">
+            <img src="https://cdn-icons-png.flaticon.com/512/2933/2933116.png" className="w-8 h-8" alt="logo" />
             <div>
-              <h1 className="text-xl font-bold text-indigo-900 tracking-tight">Unikreate</h1>
-              <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest">Money Manager</p>
+              <h1 className="text-lg font-bold text-indigo-900 tracking-tight">Unikreate</h1>
+              <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">Money Manager</p>
             </div>
           </header>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-indigo-600 text-white p-4 rounded-xl col-span-2 shadow-sm">
-              <p className="text-xs font-semibold text-indigo-200 uppercase tracking-wider mb-1">Net Profit</p>
-              <h2 className="text-3xl font-bold">{formatINR(netProfit)}</h2>
+          {/* DASHBOARD */}
+          <div className="grid grid-cols-2 gap-2">
+            
+            {/* BUSINESS PROFIT */}
+            <div className="bg-indigo-600 text-white p-4 rounded-xl col-span-2 shadow-sm flex justify-between items-center">
+              <div>
+                <p className="text-[10px] font-semibold text-indigo-200 uppercase tracking-wider mb-0.5">Business Net Profit</p>
+                <h2 className="text-2xl font-bold">{formatINR(netProfit)}</h2>
+              </div>
+              <div className="text-right border-l border-indigo-400 pl-4">
+                <p className="text-[10px] font-semibold text-indigo-200 uppercase tracking-wider mb-0.5">Today's Profit</p>
+                <h2 className={`text-xl font-bold ${todayProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  {todayProfit >= 0 ? '+' : ''}{formatINR(todayProfit)}
+                </h2>
+              </div>
+            </div>
+
+            {/* AMIT'S PERSONAL WALLET */}
+            <div className="bg-slate-800 text-white p-3 rounded-xl col-span-2 shadow-sm flex justify-between items-center">
+              <div>
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Amit's Personal Wallet</p>
+                <h2 className={`text-xl font-bold ${personalBalance >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{formatINR(personalBalance)}</h2>
+              </div>
+              <div className="text-right text-[9px] font-bold">
+                <p className="text-emerald-400 mb-0.5">Earned: +{formatINR(personalProfit)}</p>
+                <p className="text-rose-400">Spent: -{formatINR(personalExpense)}</p>
+              </div>
+            </div>
+
+            {/* Business Stats */}
+            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+              <span className="text-[9px] text-slate-500 uppercase font-bold block mb-1">Total Sales (SP)</span>
+              <strong className="text-slate-800 text-sm">{formatINR(totalRevenue)}</strong>
             </div>
             <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-              <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">To Take</span>
-              <strong className="text-emerald-600 text-lg">{formatINR(totalToTake)}</strong>
+              <span className="text-[9px] text-slate-500 uppercase font-bold block mb-1">Total Buy Price (BP)</span>
+              <strong className="text-slate-800 text-sm">{formatINR(totalBP)}</strong>
             </div>
+
+            {/* Expenses & Khata */}
             <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-              <span className="text-[10px] text-slate-500 uppercase font-bold block mb-1">To Give</span>
-              <strong className="text-rose-600 text-lg">{formatINR(totalToGive)}</strong>
+              <span className="text-[9px] text-slate-500 uppercase font-bold block mb-1">Business Exp.</span>
+              <strong className="text-rose-600 text-sm">{formatINR(totalExp)}</strong>
+            </div>
+            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-[9px] text-slate-500 uppercase font-bold">To Take</span>
+                <strong className="text-emerald-600 text-[11px]">{formatINR(totalToTake)}</strong>
+              </div>
+              <div className="flex justify-between items-center border-t pt-1">
+                <span className="text-[9px] text-slate-500 uppercase font-bold">To Give</span>
+                <strong className="text-rose-600 text-[11px]">{formatINR(totalToGive)}</strong>
+              </div>
             </div>
           </div>
 
+          {/* INPUT FORMS */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-            <div className="flex bg-slate-100 p-1 rounded-lg mb-4">
-              <button onClick={() => setActiveFormTab('trade')} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${activeFormTab === 'trade' ? 'bg-white text-indigo-700 shadow' : 'text-slate-500'}`}>+ Sale</button>
-              <button onClick={() => setActiveFormTab('expense')} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${activeFormTab === 'expense' ? 'bg-white text-rose-700 shadow' : 'text-slate-500'}`}>+ Expense</button>
-              <button onClick={() => setActiveFormTab('due')} className={`flex-1 py-2 text-xs font-bold rounded-md transition-all ${activeFormTab === 'due' ? 'bg-white text-amber-700 shadow' : 'text-slate-500'}`}>+ Due</button>
+            <div className="flex bg-slate-100 p-1 rounded-lg mb-4 text-[11px]">
+              <button onClick={() => setActiveFormTab('trade')} className={`flex-1 py-2 font-bold rounded-md transition-all ${activeFormTab === 'trade' ? 'bg-white text-indigo-700 shadow' : 'text-slate-500'}`}>+ Sale</button>
+              <button onClick={() => setActiveFormTab('expense')} className={`flex-1 py-2 font-bold rounded-md transition-all ${activeFormTab === 'expense' ? 'bg-white text-rose-700 shadow' : 'text-slate-500'}`}>+ Exp</button>
+              <button onClick={() => setActiveFormTab('due')} className={`flex-1 py-2 font-bold rounded-md transition-all ${activeFormTab === 'due' ? 'bg-white text-amber-700 shadow' : 'text-slate-500'}`}>+ Due</button>
+              <button onClick={() => setActiveFormTab('personal')} className={`flex-1 py-2 font-bold rounded-md transition-all ${activeFormTab === 'personal' ? 'bg-white text-slate-800 shadow' : 'text-slate-500'}`}>+ Amit</button>
             </div>
 
             {activeFormTab === 'trade' && (
@@ -163,23 +236,20 @@
                   <div className="flex-1"><label className="block text-[10px] font-bold text-slate-500">Product Name</label><input type="text" name="productName" value={tradeForm.productName} onChange={(e) => handleInput(e, setTradeForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
                   <div className="w-16"><label className="block text-[10px] font-bold text-slate-500">Qty</label><input type="number" name="quantity" value={tradeForm.quantity} onChange={(e) => handleInput(e, setTradeForm)} min="1" required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
                 </div>
-                
-                {/* 3 Columns to save space on mobile */}
                 <div className="flex gap-2">
-                  <div className="flex-1"><label className="block text-[10px] font-bold text-rose-600">Buy/pc (₹)</label><input type="number" name="buyingPrice" value={tradeForm.buyingPrice} onChange={(e) => handleInput(e, setTradeForm)} step="0.01" required className="w-full p-2 text-sm border border-rose-200 rounded outline-none"/></div>
-                  <div className="flex-1"><label className="block text-[10px] font-bold text-amber-600">Exp/pc (₹)</label><input type="number" name="expensePerPc" value={tradeForm.expensePerPc} onChange={(e) => handleInput(e, setTradeForm)} step="0.01" placeholder="0" className="w-full p-2 text-sm border border-amber-200 rounded outline-none"/></div>
-                  <div className="flex-1"><label className="block text-[10px] font-bold text-emerald-600">Sell/pc (₹)</label><input type="number" name="sellingPrice" value={tradeForm.sellingPrice} onChange={(e) => handleInput(e, setTradeForm)} step="0.01" required className="w-full p-2 text-sm border border-emerald-200 rounded outline-none"/></div>
+                  <div className="flex-1"><label className="block text-[10px] font-bold text-rose-600">Buy/pc</label><input type="number" name="buyingPrice" value={tradeForm.buyingPrice} onChange={(e) => handleInput(e, setTradeForm)} step="0.01" required className="w-full p-2 text-sm border border-rose-200 rounded outline-none"/></div>
+                  <div className="flex-1"><label className="block text-[10px] font-bold text-amber-600">Exp/pc</label><input type="number" name="expensePerPc" value={tradeForm.expensePerPc} onChange={(e) => handleInput(e, setTradeForm)} step="0.01" placeholder="0" className="w-full p-2 text-sm border border-amber-200 rounded outline-none"/></div>
+                  <div className="flex-1"><label className="block text-[10px] font-bold text-emerald-600">Sell/pc</label><input type="number" name="sellingPrice" value={tradeForm.sellingPrice} onChange={(e) => handleInput(e, setTradeForm)} step="0.01" required className="w-full p-2 text-sm border border-emerald-200 rounded outline-none"/></div>
                 </div>
-                
                 <button type="submit" className="w-full py-2.5 mt-2 rounded-lg text-sm font-bold text-white bg-indigo-600">Save Sale</button>
               </form>
             )}
 
             {activeFormTab === 'expense' && (
               <form onSubmit={handleExpenseSubmit} className="space-y-3">
-                <div><label className="block text-[10px] font-bold text-slate-500">Item (Tea, Rent...)</label><input type="text" name="description" value={expenseForm.description} onChange={(e) => handleInput(e, setExpenseForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                <div><label className="block text-[10px] font-bold text-slate-500">Business Expense (Tea, Rent...)</label><input type="text" name="description" value={expenseForm.description} onChange={(e) => handleInput(e, setExpenseForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
                 <div><label className="block text-[10px] font-bold text-slate-500">Amount (₹)</label><input type="number" name="amount" value={expenseForm.amount} onChange={(e) => handleInput(e, setExpenseForm)} step="0.01" required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
-                <button type="submit" className="w-full py-2.5 rounded-lg text-sm font-bold text-white bg-rose-600">Save Expense</button>
+                <button type="submit" className="w-full py-2.5 rounded-lg text-sm font-bold text-white bg-rose-600">Save Business Exp</button>
               </form>
             )}
 
@@ -194,31 +264,40 @@
                 <button type="submit" className={`w-full py-2.5 rounded-lg text-sm font-bold text-white ${dueForm.type === 'take' ? 'bg-emerald-600' : 'bg-rose-600'}`}>Save Due</button>
               </form>
             )}
+
+            {/* AMIT PERSONAL FORM */}
+            {activeFormTab === 'personal' && (
+              <form onSubmit={handlePersonalSubmit} className="space-y-3">
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setPersonalForm(p => ({...p, type: 'profit'}))} className={`flex-1 py-1.5 text-xs font-bold rounded ${personalForm.type === 'profit' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>My Profit / Income</button>
+                  <button type="button" onClick={() => setPersonalForm(p => ({...p, type: 'expense'}))} className={`flex-1 py-1.5 text-xs font-bold rounded ${personalForm.type === 'expense' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}`}>My Personal Spend</button>
+                </div>
+                <div><label className="block text-[10px] font-bold text-slate-500">Detail</label><input type="text" name="description" value={personalForm.description} onChange={(e) => handleInput(e, setPersonalForm)} placeholder="e.g. Side work, Personal Petrol..." required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                <div><label className="block text-[10px] font-bold text-slate-500">Amount (₹)</label><input type="number" name="amount" value={personalForm.amount} onChange={(e) => handleInput(e, setPersonalForm)} step="0.01" required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                <button type="submit" className={`w-full py-2.5 rounded-lg text-sm font-bold text-white ${personalForm.type === 'profit' ? 'bg-emerald-600' : 'bg-rose-600'}`}>Save Personal Entry</button>
+              </form>
+            )}
           </div>
 
+          {/* HISTORY FEED */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
-            <div className="flex border-b border-slate-200 mb-3 pb-2 gap-4 text-sm font-bold">
-              <span onClick={() => setActiveFeedTab('trades')} className={`${activeFeedTab === 'trades' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-400'} cursor-pointer`}>Sales</span>
-              <span onClick={() => setActiveFeedTab('expenses')} className={`${activeFeedTab === 'expenses' ? 'text-rose-600 border-b-2 border-rose-600' : 'text-slate-400'} cursor-pointer`}>Expenses</span>
-              <span onClick={() => setActiveFeedTab('dues')} className={`${activeFeedTab === 'dues' ? 'text-amber-600 border-b-2 border-amber-600' : 'text-slate-400'} cursor-pointer`}>Khata</span>
+            <div className="flex border-b border-slate-200 mb-3 pb-2 gap-3 text-xs font-bold overflow-x-auto">
+              <span onClick={() => setActiveFeedTab('trades')} className={`whitespace-nowrap ${activeFeedTab === 'trades' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-slate-400'} cursor-pointer`}>Sales</span>
+              <span onClick={() => setActiveFeedTab('expenses')} className={`whitespace-nowrap ${activeFeedTab === 'expenses' ? 'text-rose-600 border-b-2 border-rose-600' : 'text-slate-400'} cursor-pointer`}>Biz Exp</span>
+              <span onClick={() => setActiveFeedTab('dues')} className={`whitespace-nowrap ${activeFeedTab === 'dues' ? 'text-amber-600 border-b-2 border-amber-600' : 'text-slate-400'} cursor-pointer`}>Khata</span>
+              <span onClick={() => setActiveFeedTab('personal')} className={`whitespace-nowrap ${activeFeedTab === 'personal' ? 'text-slate-800 border-b-2 border-slate-800' : 'text-slate-400'} cursor-pointer`}>Amit's</span>
             </div>
             
             <div className="space-y-3">
               {activeFeedTab === 'trades' && transactions.map(t => {
-                const oldBatchExp = parseFloat(t.expenses) || 0;
-                const pcExp = parseFloat(t.expensePerPc) || 0;
-                
+                const oldBatchExp = parseFloat(t.expenses) || 0; const pcExp = parseFloat(t.expensePerPc) || 0;
                 const cost = (t.buyingPrice * t.quantity) + (pcExp * t.quantity) + oldBatchExp;
-                const revenue = t.sellingPrice * t.quantity;
-                const profit = revenue - cost;
-                
+                const profit = (t.sellingPrice * t.quantity) - cost;
                 return (
                   <div key={t.id} className="flex justify-between items-center p-3 rounded-lg border border-slate-100 bg-slate-50">
                     <div>
                       <h4 className="font-bold text-sm text-slate-900">{t.productName} <span className="text-[10px] bg-slate-200 px-1 py-0.5 rounded">{t.quantity}pc</span></h4>
-                      <p className="text-[10px] text-slate-500 mt-0.5">
-                        BP:₹{t.buyingPrice} | SP:₹{t.sellingPrice} {pcExp > 0 ? `| Exp/pc:₹${pcExp}` : ''} {oldBatchExp > 0 ? `| BatchExp:₹${oldBatchExp}` : ''}
-                      </p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">BP:₹{t.buyingPrice} | SP:₹{t.sellingPrice} {pcExp > 0 ? `| Exp:₹${pcExp}` : ''}</p>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className={`font-bold text-sm ${profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{profit >= 0 ? '+' : '-'}{formatINR(Math.abs(profit))}</span>
@@ -254,9 +333,25 @@
                 </div>
               ))}
 
+              {/* AMIT PERSONAL FEED */}
+              {activeFeedTab === 'personal' && personalEntries.map(p => (
+                <div key={p.id} className="flex justify-between items-center p-3 rounded-lg border border-slate-100 bg-slate-800 text-white">
+                  <div>
+                    <span className={`text-[10px] uppercase font-bold ${p.type === 'profit' ? 'text-emerald-400' : 'text-rose-400'}`}>{p.type === 'profit' ? 'My Profit' : 'My Spend'}</span>
+                    <h4 className="font-bold text-sm text-slate-100">{p.description}</h4>
+                    <p className="text-[10px] text-slate-400">{formatDate(p.timestamp)}</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className={`font-bold text-sm ${p.type === 'profit' ? 'text-emerald-400' : 'text-rose-400'}`}>{p.type === 'profit' ? '+' : '-'}{formatINR(p.amount)}</span>
+                    <i onClick={() => setPersonalEntries(personalEntries.filter(item => item.id !== p.id))} className="fa-solid fa-trash text-slate-500 text-lg py-1 px-2"></i>
+                  </div>
+                </div>
+              ))}
+
               {((activeFeedTab === 'trades' && transactions.length === 0) || 
                 (activeFeedTab === 'expenses' && dailyExpenses.length === 0) || 
-                (activeFeedTab === 'dues' && dues.length === 0)) && (
+                (activeFeedTab === 'dues' && dues.length === 0) ||
+                (activeFeedTab === 'personal' && personalEntries.length === 0)) && (
                 <div className="text-center py-6 text-slate-400 text-sm">No records found.</div>
               )}
             </div>
