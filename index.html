@@ -1,4 +1,4 @@
-                    <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -43,11 +43,12 @@
       const [activeFormTab, setActiveFormTab] = useState('trade');
       const [activeFeedTab, setActiveFeedTab] = useState('trades');
 
-      // Forms
-      const [tradeForm, setTradeForm] = useState({ productName: '', quantity: 1, buyingPrice: '', sellingPrice: '', expensePerPc: '', date: new Date().toISOString().split('T')[0] });
-      const [expenseForm, setExpenseForm] = useState({ description: '', amount: '' });
-      const [dueForm, setDueForm] = useState({ personName: '', amount: '', type: 'take', date: new Date().toISOString().split('T')[0] });
-      const [personalForm, setPersonalForm] = useState({ description: '', amount: '', type: 'profit' });
+      // Forms with Date Fields
+      const todayDate = new Date().toISOString().split('T')[0];
+      const [tradeForm, setTradeForm] = useState({ productName: '', quantity: 1, buyingPrice: '', sellingPrice: '', expensePerPc: '', date: todayDate });
+      const [expenseForm, setExpenseForm] = useState({ description: '', amount: '', date: todayDate });
+      const [dueForm, setDueForm] = useState({ personName: '', amount: '', type: 'take', date: todayDate });
+      const [personalForm, setPersonalForm] = useState({ description: '', amount: '', type: 'profit', date: todayDate });
 
       // Auto Save
       useEffect(() => localStorage.setItem('unikreate_trade_tracker', JSON.stringify(transactions)), [transactions]);
@@ -89,7 +90,9 @@
         dailyExpenses.forEach(curr => { 
           const expAmt = parseFloat(curr.amount) || 0;
           totalExpenses += expAmt; moneyOut += expAmt;
-          if (curr.timestamp && curr.timestamp.startsWith(todayStr)) todayCost += expAmt;
+          if (curr.date === todayStr || (curr.timestamp && curr.timestamp.startsWith(todayStr))) {
+            todayCost += expAmt;
+          }
         });
         
         let toTake = 0; let toGive = 0;
@@ -124,15 +127,15 @@
         if (!tradeForm.productName || !tradeForm.buyingPrice || !tradeForm.sellingPrice) return;
         const newTx = { ...tradeForm, id: crypto.randomUUID(), quantity: parseFloat(tradeForm.quantity) || 1, buyingPrice: parseFloat(tradeForm.buyingPrice), sellingPrice: parseFloat(tradeForm.sellingPrice), expensePerPc: parseFloat(tradeForm.expensePerPc) || 0 };
         setTransactions([newTx, ...transactions]);
-        setTradeForm(p => ({ ...p, productName: '', quantity: 1, buyingPrice: '', sellingPrice: '', expensePerPc: '' }));
+        setTradeForm(p => ({ ...p, productName: '', quantity: 1, buyingPrice: '', sellingPrice: '', expensePerPc: '' })); // Keeps selected date
         setActiveFeedTab('trades');
       };
 
       const handleExpenseSubmit = (e) => {
         e.preventDefault();
         if (!expenseForm.description || !expenseForm.amount) return;
-        setDailyExpenses([{ id: crypto.randomUUID(), description: expenseForm.description, amount: parseFloat(expenseForm.amount), timestamp: new Date().toISOString() }, ...dailyExpenses]);
-        setExpenseForm({ description: '', amount: '' });
+        setDailyExpenses([{ id: crypto.randomUUID(), description: expenseForm.description, amount: parseFloat(expenseForm.amount), date: expenseForm.date }, ...dailyExpenses]);
+        setExpenseForm(p => ({ ...p, description: '', amount: '' }));
         setActiveFeedTab('expenses');
       };
 
@@ -147,16 +150,53 @@
       const handlePersonalSubmit = (e) => {
         e.preventDefault();
         if (!personalForm.description || !personalForm.amount) return;
-        setPersonalEntries([{ id: crypto.randomUUID(), ...personalForm, amount: parseFloat(personalForm.amount), timestamp: new Date().toISOString() }, ...personalEntries]);
+        setPersonalEntries([{ id: crypto.randomUUID(), ...personalForm, amount: parseFloat(personalForm.amount) }, ...personalEntries]);
         setPersonalForm(p => ({ ...p, description: '', amount: '' }));
         setActiveFeedTab('personal');
       };
 
+      // Backup and Restore Logic
+      const exportData = () => {
+        const data = { trades: transactions, expenses: dailyExpenses, dues: dues, personal: personalEntries };
+        const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `Unikreate_Backup_${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+      };
+
+      const importData = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        if (window.confirm('⚠️ Are you sure? Uploading this backup will replace your current data!')) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            try {
+              const data = JSON.parse(event.target.result);
+              if(data.trades) setTransactions(data.trades);
+              if(data.expenses) setDailyExpenses(data.expenses);
+              if(data.dues) setDues(data.dues);
+              if(data.personal) setPersonalEntries(data.personal);
+              alert('✅ Backup restored successfully!');
+            } catch(err) {
+              alert('❌ Error: Invalid Backup File');
+            }
+          };
+          reader.readAsText(file);
+        }
+        e.target.value = ''; // Reset input
+      };
+
       const formatINR = (amt) => '₹' + amt.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-      const formatDate = (iso) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+      const formatDate = (iso) => {
+        if(!iso) return '';
+        return new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+      };
 
       return (
-        <div className="p-4 max-w-lg mx-auto space-y-4 pb-20">
+        <div className="p-4 max-w-lg mx-auto space-y-4 pb-12">
           <header className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex items-center gap-3">
             <img src="https://cdn-icons-png.flaticon.com/512/2933/2933116.png" className="w-8 h-8" alt="logo" />
             <div>
@@ -241,6 +281,7 @@
                   <div className="flex-1"><label className="block text-[10px] font-bold text-amber-600">Exp/pc</label><input type="number" name="expensePerPc" value={tradeForm.expensePerPc} onChange={(e) => handleInput(e, setTradeForm)} step="0.01" placeholder="0" className="w-full p-2 text-sm border border-amber-200 rounded outline-none"/></div>
                   <div className="flex-1"><label className="block text-[10px] font-bold text-emerald-600">Sell/pc</label><input type="number" name="sellingPrice" value={tradeForm.sellingPrice} onChange={(e) => handleInput(e, setTradeForm)} step="0.01" required className="w-full p-2 text-sm border border-emerald-200 rounded outline-none"/></div>
                 </div>
+                <div><label className="block text-[10px] font-bold text-slate-500">Date</label><input type="date" name="date" value={tradeForm.date} onChange={(e) => handleInput(e, setTradeForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
                 <button type="submit" className="w-full py-2.5 mt-2 rounded-lg text-sm font-bold text-white bg-indigo-600">Save Sale</button>
               </form>
             )}
@@ -248,7 +289,10 @@
             {activeFormTab === 'expense' && (
               <form onSubmit={handleExpenseSubmit} className="space-y-3">
                 <div><label className="block text-[10px] font-bold text-slate-500">Business Expense (Tea, Rent...)</label><input type="text" name="description" value={expenseForm.description} onChange={(e) => handleInput(e, setExpenseForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
-                <div><label className="block text-[10px] font-bold text-slate-500">Amount (₹)</label><input type="number" name="amount" value={expenseForm.amount} onChange={(e) => handleInput(e, setExpenseForm)} step="0.01" required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                <div className="flex gap-2">
+                  <div className="flex-1"><label className="block text-[10px] font-bold text-slate-500">Amount (₹)</label><input type="number" name="amount" value={expenseForm.amount} onChange={(e) => handleInput(e, setExpenseForm)} step="0.01" required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                  <div className="flex-1"><label className="block text-[10px] font-bold text-slate-500">Date</label><input type="date" name="date" value={expenseForm.date} onChange={(e) => handleInput(e, setExpenseForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                </div>
                 <button type="submit" className="w-full py-2.5 rounded-lg text-sm font-bold text-white bg-rose-600">Save Business Exp</button>
               </form>
             )}
@@ -260,7 +304,10 @@
                   <button type="button" onClick={() => setDueForm(p => ({...p, type: 'give'}))} className={`flex-1 py-1.5 text-xs font-bold rounded ${dueForm.type === 'give' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}`}>I Give</button>
                 </div>
                 <div><label className="block text-[10px] font-bold text-slate-500">Name</label><input type="text" name="personName" value={dueForm.personName} onChange={(e) => handleInput(e, setDueForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
-                <div><label className="block text-[10px] font-bold text-slate-500">Amount (₹)</label><input type="number" name="amount" value={dueForm.amount} onChange={(e) => handleInput(e, setDueForm)} step="0.01" required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                <div className="flex gap-2">
+                  <div className="flex-1"><label className="block text-[10px] font-bold text-slate-500">Amount (₹)</label><input type="number" name="amount" value={dueForm.amount} onChange={(e) => handleInput(e, setDueForm)} step="0.01" required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                  <div className="flex-1"><label className="block text-[10px] font-bold text-slate-500">Date</label><input type="date" name="date" value={dueForm.date} onChange={(e) => handleInput(e, setDueForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                </div>
                 <button type="submit" className={`w-full py-2.5 rounded-lg text-sm font-bold text-white ${dueForm.type === 'take' ? 'bg-emerald-600' : 'bg-rose-600'}`}>Save Due</button>
               </form>
             )}
@@ -273,7 +320,10 @@
                   <button type="button" onClick={() => setPersonalForm(p => ({...p, type: 'expense'}))} className={`flex-1 py-1.5 text-xs font-bold rounded ${personalForm.type === 'expense' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}`}>My Personal Spend</button>
                 </div>
                 <div><label className="block text-[10px] font-bold text-slate-500">Detail</label><input type="text" name="description" value={personalForm.description} onChange={(e) => handleInput(e, setPersonalForm)} placeholder="e.g. Side work, Personal Petrol..." required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
-                <div><label className="block text-[10px] font-bold text-slate-500">Amount (₹)</label><input type="number" name="amount" value={personalForm.amount} onChange={(e) => handleInput(e, setPersonalForm)} step="0.01" required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                <div className="flex gap-2">
+                  <div className="flex-1"><label className="block text-[10px] font-bold text-slate-500">Amount (₹)</label><input type="number" name="amount" value={personalForm.amount} onChange={(e) => handleInput(e, setPersonalForm)} step="0.01" required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                  <div className="flex-1"><label className="block text-[10px] font-bold text-slate-500">Date</label><input type="date" name="date" value={personalForm.date} onChange={(e) => handleInput(e, setPersonalForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                </div>
                 <button type="submit" className={`w-full py-2.5 rounded-lg text-sm font-bold text-white ${personalForm.type === 'profit' ? 'bg-emerald-600' : 'bg-rose-600'}`}>Save Personal Entry</button>
               </form>
             )}
@@ -288,7 +338,7 @@
               <span onClick={() => setActiveFeedTab('personal')} className={`whitespace-nowrap ${activeFeedTab === 'personal' ? 'text-slate-800 border-b-2 border-slate-800' : 'text-slate-400'} cursor-pointer`}>Amit's</span>
             </div>
             
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-[400px] overflow-y-auto">
               {activeFeedTab === 'trades' && transactions.map(t => {
                 const oldBatchExp = parseFloat(t.expenses) || 0; const pcExp = parseFloat(t.expensePerPc) || 0;
                 const cost = (t.buyingPrice * t.quantity) + (pcExp * t.quantity) + oldBatchExp;
@@ -297,7 +347,7 @@
                   <div key={t.id} className="flex justify-between items-center p-3 rounded-lg border border-slate-100 bg-slate-50">
                     <div>
                       <h4 className="font-bold text-sm text-slate-900">{t.productName} <span className="text-[10px] bg-slate-200 px-1 py-0.5 rounded">{t.quantity}pc</span></h4>
-                      <p className="text-[10px] text-slate-500 mt-0.5">BP:₹{t.buyingPrice} | SP:₹{t.sellingPrice} {pcExp > 0 ? `| Exp:₹${pcExp}` : ''}</p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">{formatDate(t.date || t.timestamp)} | BP:₹{t.buyingPrice} | SP:₹{t.sellingPrice}</p>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className={`font-bold text-sm ${profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{profit >= 0 ? '+' : '-'}{formatINR(Math.abs(profit))}</span>
@@ -311,7 +361,7 @@
                 <div key={exp.id} className="flex justify-between items-center p-3 rounded-lg border border-slate-100 bg-slate-50">
                   <div>
                     <h4 className="font-bold text-sm text-slate-900">{exp.description}</h4>
-                    <p className="text-[10px] text-slate-500">{formatDate(exp.timestamp)}</p>
+                    <p className="text-[10px] text-slate-500">{formatDate(exp.date || exp.timestamp)}</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="font-bold text-sm text-rose-600">-{formatINR(exp.amount)}</span>
@@ -325,6 +375,7 @@
                   <div>
                     <span className={`text-[10px] uppercase font-bold ${d.type === 'take' ? 'text-emerald-500' : 'text-rose-500'}`}>{d.type === 'take' ? 'To Take' : 'To Give'}</span>
                     <h4 className="font-bold text-sm text-slate-900">{d.personName}</h4>
+                    <p className="text-[10px] text-slate-500">{formatDate(d.date || d.timestamp)}</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`font-bold text-sm ${d.type === 'take' ? 'text-emerald-600' : 'text-rose-600'}`}>{formatINR(d.amount)}</span>
@@ -339,7 +390,7 @@
                   <div>
                     <span className={`text-[10px] uppercase font-bold ${p.type === 'profit' ? 'text-emerald-400' : 'text-rose-400'}`}>{p.type === 'profit' ? 'My Profit' : 'My Spend'}</span>
                     <h4 className="font-bold text-sm text-slate-100">{p.description}</h4>
-                    <p className="text-[10px] text-slate-400">{formatDate(p.timestamp)}</p>
+                    <p className="text-[10px] text-slate-400">{formatDate(p.date || p.timestamp)}</p>
                   </div>
                   <div className="flex items-center gap-3">
                     <span className={`font-bold text-sm ${p.type === 'profit' ? 'text-emerald-400' : 'text-rose-400'}`}>{p.type === 'profit' ? '+' : '-'}{formatINR(p.amount)}</span>
@@ -356,6 +407,22 @@
               )}
             </div>
           </div>
+
+          {/* BACKUP AND RESTORE SECTION */}
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 mt-4 text-center">
+            <h3 className="text-xs font-bold text-slate-500 mb-3 uppercase tracking-widest">Data Backup & Restore</h3>
+            <p className="text-[10px] text-slate-400 mb-3">Download your records safely to your phone, or upload a previous backup.</p>
+            <div className="flex gap-3 justify-center">
+               <button onClick={exportData} className="flex-1 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-200 transition-colors">
+                  <i className="fa-solid fa-download mr-1"></i> Save Backup
+               </button>
+               <label className="flex-1 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-100 transition-colors">
+                  <i className="fa-solid fa-upload mr-1"></i> Upload Data
+                  <input type="file" accept=".json" onChange={importData} className="hidden" />
+               </label>
+            </div>
+          </div>
+
         </div>
       );
     }
