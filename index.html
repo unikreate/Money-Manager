@@ -38,11 +38,12 @@
       const [dailyExpenses, setDailyExpenses] = useState(() => JSON.parse(localStorage.getItem('unikreate_daily_expenses')) || []);
       const [dues, setDues] = useState(() => JSON.parse(localStorage.getItem('unikreate_dues_tracker')) || []);
       const [personalEntries, setPersonalEntries] = useState(() => JSON.parse(localStorage.getItem('unikreate_personal_ledger')) || []);
+      const [actualCash, setActualCash] = useState(() => localStorage.getItem('unikreate_actual_cash') || '');
 
       // UI States
       const [activeFormTab, setActiveFormTab] = useState('trade');
       const [activeFeedTab, setActiveFeedTab] = useState('trades');
-      const [settlingDue, setSettlingDue] = useState(null); // Tracks which Khata is being cleared
+      const [settlingDue, setSettlingDue] = useState(null); 
 
       // Forms with Date Fields
       const todayDate = new Date().toISOString().split('T')[0];
@@ -59,6 +60,7 @@
       useEffect(() => localStorage.setItem('unikreate_daily_expenses', JSON.stringify(dailyExpenses)), [dailyExpenses]);
       useEffect(() => localStorage.setItem('unikreate_dues_tracker', JSON.stringify(dues)), [dues]);
       useEffect(() => localStorage.setItem('unikreate_personal_ledger', JSON.stringify(personalEntries)), [personalEntries]);
+      useEffect(() => localStorage.setItem('unikreate_actual_cash', actualCash), [actualCash]);
 
       // Massive Summary Calculations (Includes Date-Wise math)
       const { 
@@ -71,7 +73,6 @@
         let rev = 0; let totalBuyingPrice = 0; let totalExpenses = 0; let moneyOut = 0;
         let todayRev = 0; let todayCost = 0;
         
-        // Date-wise variables
         let dRev = 0; let dBP = 0; let dExp = 0; let dCost = 0;
 
         const todayStr = new Date().toISOString().split('T')[0];
@@ -95,8 +96,6 @@
           if (recordDate === todayStr) {
             todayRev += itemRev; todayCost += itemCost;
           }
-          
-          // Date-Wise Report calculation
           if (recordDate === summaryDate) {
             dRev += itemRev; dBP += itemBP; dExp += itemExp; dCost += itemCost;
           }
@@ -111,7 +110,6 @@
           if (recordDate === todayStr) {
             todayCost += expAmt;
           }
-          // Date-Wise Report calculation
           if (recordDate === summaryDate) {
             dExp += expAmt; dCost += expAmt;
           }
@@ -180,34 +178,33 @@
       // Smart Khata Clearing Logic
       const handleClearDue = (d, destination) => {
         if (destination === 'amit') {
-          if (d.type === 'take') { // Received Money
+          if (d.type === 'take') { 
             setPersonalEntries([{ id: crypto.randomUUID(), description: `Khata Recv: ${d.personName}`, amount: d.amount, type: 'profit', date: todayDate }, ...personalEntries]);
-          } else { // Paid Money
+          } else { 
             setPersonalEntries([{ id: crypto.randomUUID(), description: `Khata Paid: ${d.personName}`, amount: d.amount, type: 'expense', date: todayDate }, ...personalEntries]);
           }
         } 
         else if (destination === 'business') {
-          if (d.type === 'take') { // Received Money (Count as a 100% profit trade)
+          if (d.type === 'take') { 
             setTransactions([{ id: crypto.randomUUID(), productName: `Khata Recv: ${d.personName}`, quantity: 1, buyingPrice: 0, sellingPrice: d.amount, expensePerPc: 0, date: todayDate }, ...transactions]);
-          } else { // Paid Money (Count as a business expense)
+          } else { 
             setDailyExpenses([{ id: crypto.randomUUID(), description: `Khata Paid: ${d.personName}`, amount: d.amount, date: todayDate }, ...dailyExpenses]);
           }
         }
-        
-        // Remove the due regardless of destination
         setDues(dues.filter(item => item.id !== d.id));
         setSettlingDue(null);
       };
 
       // Backup Logic
       const exportData = () => {
-        const data = { trades: transactions, expenses: dailyExpenses, dues: dues, personal: personalEntries };
+        const data = { trades: transactions, expenses: dailyExpenses, dues: dues, personal: personalEntries, actualCash: actualCash };
         const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `Unikreate_Backup_${todayDate}.json`;
         a.click();
       };
+      
       const importData = (e) => {
         const file = e.target.files[0];
         if (!file) return;
@@ -220,6 +217,7 @@
               if(data.expenses) setDailyExpenses(data.expenses);
               if(data.dues) setDues(data.dues);
               if(data.personal) setPersonalEntries(data.personal);
+              if(data.actualCash !== undefined) setActualCash(data.actualCash);
               alert('✅ Backup restored successfully!');
             } catch(err) { alert('❌ Error: Invalid Backup File'); }
           };
@@ -271,7 +269,49 @@
             </div>
           </div>
 
-          {/* NEW DATE-WISE REPORT CARD */}
+          {/* TOTAL ALL-TIME REPORT & CASH BOX */}
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+             <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-3">📊 Total All-Time Report</h3>
+             
+             <div className="grid grid-cols-2 gap-2 text-[10px] mb-3 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                <div>
+                   <p className="text-slate-500 font-bold mb-0.5">All-Time Sales (SP)</p>
+                   <p className="text-slate-900 font-bold text-sm">{formatINR(totalRevenue)}</p>
+                </div>
+                <div>
+                   <p className="text-slate-500 font-bold mb-0.5">All-Time Buy Price</p>
+                   <p className="text-slate-900 font-bold text-sm">{formatINR(totalBP)}</p>
+                </div>
+                <div>
+                   <p className="text-slate-500 font-bold mb-0.5">All-Time Biz Exp.</p>
+                   <p className="text-rose-600 font-bold text-sm">{formatINR(totalExp)}</p>
+                </div>
+                <div>
+                   <p className="text-slate-500 font-bold mb-0.5">Amit All-Time Earned</p>
+                   <p className="text-emerald-600 font-bold text-sm">{formatINR(personalProfit)}</p>
+                </div>
+             </div>
+
+             <div className="border-t border-slate-100 pt-3">
+                <label className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                   My Actual Money (Bank + Cash)
+                </label>
+                <div className="relative mt-1">
+                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <span className="text-slate-400 font-bold">₹</span>
+                   </div>
+                   <input 
+                      type="number" 
+                      value={actualCash} 
+                      onChange={(e) => setActualCash(e.target.value)} 
+                      placeholder="Write your actual balance here..." 
+                      className="w-full pl-7 pr-3 py-2 text-sm font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-lg outline-none focus:ring-2 focus:ring-indigo-500"
+                   />
+                </div>
+             </div>
+          </div>
+
+          {/* DATE-WISE REPORT CARD */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-indigo-500">
             <div className="flex justify-between items-center mb-3">
               <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">📅 Date-Wise Report</h3>
@@ -405,7 +445,6 @@
                 </div>
               ))}
 
-              {/* KHATA LIST WITH SMART SETTLEMENT POPUP */}
               {activeFeedTab === 'dues' && dues.map(d => (
                 <div key={d.id} className="p-3 rounded-lg border border-slate-100 bg-white">
                   <div className="flex justify-between items-center">
@@ -424,7 +463,6 @@
                     </div>
                   </div>
                   
-                  {/* The popup asking where the money should go */}
                   {settlingDue === d.id && (
                     <div className="mt-3 pt-3 border-t border-slate-100 animate-in fade-in">
                       <p className="text-[10px] font-bold text-slate-500 mb-2 text-center">Where should this money go?</p>
