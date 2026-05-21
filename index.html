@@ -42,6 +42,7 @@
       // UI States
       const [activeFormTab, setActiveFormTab] = useState('trade');
       const [activeFeedTab, setActiveFeedTab] = useState('trades');
+      const [settlingDue, setSettlingDue] = useState(null); // Tracks which Khata is being cleared
 
       // Forms with Date Fields
       const todayDate = new Date().toISOString().split('T')[0];
@@ -49,6 +50,9 @@
       const [expenseForm, setExpenseForm] = useState({ description: '', amount: '', date: todayDate });
       const [dueForm, setDueForm] = useState({ personName: '', amount: '', type: 'take', date: todayDate });
       const [personalForm, setPersonalForm] = useState({ description: '', amount: '', type: 'profit', date: todayDate });
+      
+      // Date-Wise Report State
+      const [summaryDate, setSummaryDate] = useState(todayDate);
 
       // Auto Save
       useEffect(() => localStorage.setItem('unikreate_trade_tracker', JSON.stringify(transactions)), [transactions]);
@@ -56,16 +60,20 @@
       useEffect(() => localStorage.setItem('unikreate_dues_tracker', JSON.stringify(dues)), [dues]);
       useEffect(() => localStorage.setItem('unikreate_personal_ledger', JSON.stringify(personalEntries)), [personalEntries]);
 
-      // Calculations
+      // Massive Summary Calculations (Includes Date-Wise math)
       const { 
         totalRevenue, totalBP, totalExp, netProfit, todayProfit, 
         totalToTake, totalToGive, 
-        personalProfit, personalExpense, personalBalance 
+        personalProfit, personalExpense, personalBalance,
+        dateStats
       } = useMemo(() => {
         
-        // Business Variables
         let rev = 0; let totalBuyingPrice = 0; let totalExpenses = 0; let moneyOut = 0;
         let todayRev = 0; let todayCost = 0;
+        
+        // Date-wise variables
+        let dRev = 0; let dBP = 0; let dExp = 0; let dCost = 0;
+
         const todayStr = new Date().toISOString().split('T')[0];
         
         transactions.forEach(curr => {
@@ -82,16 +90,30 @@
           
           totalBuyingPrice += itemBP; totalExpenses += itemExp; moneyOut += itemCost; rev += itemRev;
 
-          if (curr.date === todayStr || (curr.timestamp && curr.timestamp.startsWith(todayStr))) {
+          const recordDate = curr.date || (curr.timestamp ? curr.timestamp.split('T')[0] : '');
+          
+          if (recordDate === todayStr) {
             todayRev += itemRev; todayCost += itemCost;
+          }
+          
+          // Date-Wise Report calculation
+          if (recordDate === summaryDate) {
+            dRev += itemRev; dBP += itemBP; dExp += itemExp; dCost += itemCost;
           }
         });
         
         dailyExpenses.forEach(curr => { 
           const expAmt = parseFloat(curr.amount) || 0;
+          const recordDate = curr.date || (curr.timestamp ? curr.timestamp.split('T')[0] : '');
+
           totalExpenses += expAmt; moneyOut += expAmt;
-          if (curr.date === todayStr || (curr.timestamp && curr.timestamp.startsWith(todayStr))) {
+          
+          if (recordDate === todayStr) {
             todayCost += expAmt;
+          }
+          // Date-Wise Report calculation
+          if (recordDate === summaryDate) {
+            dExp += expAmt; dCost += expAmt;
           }
         });
         
@@ -101,7 +123,6 @@
           if (d.type === 'give') toGive += parseFloat(d.amount) || 0;
         });
 
-        // Personal Variables (Amit's Wallet)
         let pProfit = 0; let pExpense = 0;
         personalEntries.forEach(p => {
           if (p.type === 'profit') pProfit += parseFloat(p.amount) || 0;
@@ -112,9 +133,10 @@
           totalRevenue: rev, totalBP: totalBuyingPrice, totalExp: totalExpenses,
           netProfit: rev - moneyOut, todayProfit: todayRev - todayCost,
           totalToTake: toTake, totalToGive: toGive,
-          personalProfit: pProfit, personalExpense: pExpense, personalBalance: pProfit - pExpense
+          personalProfit: pProfit, personalExpense: pExpense, personalBalance: pProfit - pExpense,
+          dateStats: { revenue: dRev, bp: dBP, expenses: dExp, profit: dRev - dCost }
         };
-      }, [transactions, dailyExpenses, dues, personalEntries]);
+      }, [transactions, dailyExpenses, dues, personalEntries, summaryDate]);
 
       // Inputs & Submits
       const handleInput = (e, setter) => {
@@ -127,7 +149,7 @@
         if (!tradeForm.productName || !tradeForm.buyingPrice || !tradeForm.sellingPrice) return;
         const newTx = { ...tradeForm, id: crypto.randomUUID(), quantity: parseFloat(tradeForm.quantity) || 1, buyingPrice: parseFloat(tradeForm.buyingPrice), sellingPrice: parseFloat(tradeForm.sellingPrice), expensePerPc: parseFloat(tradeForm.expensePerPc) || 0 };
         setTransactions([newTx, ...transactions]);
-        setTradeForm(p => ({ ...p, productName: '', quantity: 1, buyingPrice: '', sellingPrice: '', expensePerPc: '' })); // Keeps selected date
+        setTradeForm(p => ({ ...p, productName: '', quantity: 1, buyingPrice: '', sellingPrice: '', expensePerPc: '' })); 
         setActiveFeedTab('trades');
       };
 
@@ -155,21 +177,40 @@
         setActiveFeedTab('personal');
       };
 
-      // Backup and Restore Logic
+      // Smart Khata Clearing Logic
+      const handleClearDue = (d, destination) => {
+        if (destination === 'amit') {
+          if (d.type === 'take') { // Received Money
+            setPersonalEntries([{ id: crypto.randomUUID(), description: `Khata Recv: ${d.personName}`, amount: d.amount, type: 'profit', date: todayDate }, ...personalEntries]);
+          } else { // Paid Money
+            setPersonalEntries([{ id: crypto.randomUUID(), description: `Khata Paid: ${d.personName}`, amount: d.amount, type: 'expense', date: todayDate }, ...personalEntries]);
+          }
+        } 
+        else if (destination === 'business') {
+          if (d.type === 'take') { // Received Money (Count as a 100% profit trade)
+            setTransactions([{ id: crypto.randomUUID(), productName: `Khata Recv: ${d.personName}`, quantity: 1, buyingPrice: 0, sellingPrice: d.amount, expensePerPc: 0, date: todayDate }, ...transactions]);
+          } else { // Paid Money (Count as a business expense)
+            setDailyExpenses([{ id: crypto.randomUUID(), description: `Khata Paid: ${d.personName}`, amount: d.amount, date: todayDate }, ...dailyExpenses]);
+          }
+        }
+        
+        // Remove the due regardless of destination
+        setDues(dues.filter(item => item.id !== d.id));
+        setSettlingDue(null);
+      };
+
+      // Backup Logic
       const exportData = () => {
         const data = { trades: transactions, expenses: dailyExpenses, dues: dues, personal: personalEntries };
         const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url;
-        a.download = `Unikreate_Backup_${new Date().toISOString().split('T')[0]}.json`;
+        a.href = URL.createObjectURL(blob);
+        a.download = `Unikreate_Backup_${todayDate}.json`;
         a.click();
       };
-
       const importData = (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        
         if (window.confirm('⚠️ Are you sure? Uploading this backup will replace your current data!')) {
           const reader = new FileReader();
           reader.onload = (event) => {
@@ -180,13 +221,11 @@
               if(data.dues) setDues(data.dues);
               if(data.personal) setPersonalEntries(data.personal);
               alert('✅ Backup restored successfully!');
-            } catch(err) {
-              alert('❌ Error: Invalid Backup File');
-            }
+            } catch(err) { alert('❌ Error: Invalid Backup File'); }
           };
           reader.readAsText(file);
         }
-        e.target.value = ''; // Reset input
+        e.target.value = '';
       };
 
       const formatINR = (amt) => '₹' + amt.toLocaleString('en-IN', { maximumFractionDigits: 2 });
@@ -205,10 +244,8 @@
             </div>
           </header>
 
-          {/* DASHBOARD */}
+          {/* MAIN DASHBOARD */}
           <div className="grid grid-cols-2 gap-2">
-            
-            {/* BUSINESS PROFIT */}
             <div className="bg-indigo-600 text-white p-4 rounded-xl col-span-2 shadow-sm flex justify-between items-center">
               <div>
                 <p className="text-[10px] font-semibold text-indigo-200 uppercase tracking-wider mb-0.5">Business Net Profit</p>
@@ -222,7 +259,6 @@
               </div>
             </div>
 
-            {/* AMIT'S PERSONAL WALLET */}
             <div className="bg-slate-800 text-white p-3 rounded-xl col-span-2 shadow-sm flex justify-between items-center">
               <div>
                 <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-0.5">Amit's Personal Wallet</p>
@@ -233,30 +269,30 @@
                 <p className="text-rose-400">Spent: -{formatINR(personalExpense)}</p>
               </div>
             </div>
+          </div>
 
-            {/* Business Stats */}
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-              <span className="text-[9px] text-slate-500 uppercase font-bold block mb-1">Total Sales (SP)</span>
-              <strong className="text-slate-800 text-sm">{formatINR(totalRevenue)}</strong>
+          {/* NEW DATE-WISE REPORT CARD */}
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 border-l-4 border-l-indigo-500">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">📅 Date-Wise Report</h3>
+              <input type="date" value={summaryDate} onChange={(e) => setSummaryDate(e.target.value)} className="text-xs p-1 border rounded bg-slate-50 font-bold text-indigo-700 outline-none"/>
             </div>
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-              <span className="text-[9px] text-slate-500 uppercase font-bold block mb-1">Total Buy Price (BP)</span>
-              <strong className="text-slate-800 text-sm">{formatINR(totalBP)}</strong>
-            </div>
-
-            {/* Expenses & Khata */}
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-              <span className="text-[9px] text-slate-500 uppercase font-bold block mb-1">Business Exp.</span>
-              <strong className="text-rose-600 text-sm">{formatINR(totalExp)}</strong>
-            </div>
-            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-[9px] text-slate-500 uppercase font-bold">To Take</span>
-                <strong className="text-emerald-600 text-[11px]">{formatINR(totalToTake)}</strong>
+            <div className="grid grid-cols-4 gap-2 text-center divide-x divide-slate-100 border-t pt-3">
+              <div>
+                <p className="text-[9px] text-slate-400 font-bold mb-1">Total Sell</p>
+                <p className="text-[11px] font-bold text-slate-800">{formatINR(dateStats.revenue)}</p>
               </div>
-              <div className="flex justify-between items-center border-t pt-1">
-                <span className="text-[9px] text-slate-500 uppercase font-bold">To Give</span>
-                <strong className="text-rose-600 text-[11px]">{formatINR(totalToGive)}</strong>
+              <div>
+                <p className="text-[9px] text-slate-400 font-bold mb-1">Total BP</p>
+                <p className="text-[11px] font-bold text-slate-800">{formatINR(dateStats.bp)}</p>
+              </div>
+              <div>
+                <p className="text-[9px] text-slate-400 font-bold mb-1">Total Exp.</p>
+                <p className="text-[11px] font-bold text-rose-600">{formatINR(dateStats.expenses)}</p>
+              </div>
+              <div>
+                <p className="text-[9px] text-slate-400 font-bold mb-1">Net Profit</p>
+                <p className={`text-[11px] font-bold ${dateStats.profit >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{formatINR(dateStats.profit)}</p>
               </div>
             </div>
           </div>
@@ -288,7 +324,7 @@
 
             {activeFormTab === 'expense' && (
               <form onSubmit={handleExpenseSubmit} className="space-y-3">
-                <div><label className="block text-[10px] font-bold text-slate-500">Business Expense (Tea, Rent...)</label><input type="text" name="description" value={expenseForm.description} onChange={(e) => handleInput(e, setExpenseForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                <div><label className="block text-[10px] font-bold text-slate-500">Business Expense</label><input type="text" name="description" value={expenseForm.description} onChange={(e) => handleInput(e, setExpenseForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
                 <div className="flex gap-2">
                   <div className="flex-1"><label className="block text-[10px] font-bold text-slate-500">Amount (₹)</label><input type="number" name="amount" value={expenseForm.amount} onChange={(e) => handleInput(e, setExpenseForm)} step="0.01" required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
                   <div className="flex-1"><label className="block text-[10px] font-bold text-slate-500">Date</label><input type="date" name="date" value={expenseForm.date} onChange={(e) => handleInput(e, setExpenseForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
@@ -312,14 +348,13 @@
               </form>
             )}
 
-            {/* AMIT PERSONAL FORM */}
             {activeFormTab === 'personal' && (
               <form onSubmit={handlePersonalSubmit} className="space-y-3">
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => setPersonalForm(p => ({...p, type: 'profit'}))} className={`flex-1 py-1.5 text-xs font-bold rounded ${personalForm.type === 'profit' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>My Profit / Income</button>
-                  <button type="button" onClick={() => setPersonalForm(p => ({...p, type: 'expense'}))} className={`flex-1 py-1.5 text-xs font-bold rounded ${personalForm.type === 'expense' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}`}>My Personal Spend</button>
+                  <button type="button" onClick={() => setPersonalForm(p => ({...p, type: 'profit'}))} className={`flex-1 py-1.5 text-xs font-bold rounded ${personalForm.type === 'profit' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>My Profit</button>
+                  <button type="button" onClick={() => setPersonalForm(p => ({...p, type: 'expense'}))} className={`flex-1 py-1.5 text-xs font-bold rounded ${personalForm.type === 'expense' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-500'}`}>My Spend</button>
                 </div>
-                <div><label className="block text-[10px] font-bold text-slate-500">Detail</label><input type="text" name="description" value={personalForm.description} onChange={(e) => handleInput(e, setPersonalForm)} placeholder="e.g. Side work, Personal Petrol..." required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
+                <div><label className="block text-[10px] font-bold text-slate-500">Detail</label><input type="text" name="description" value={personalForm.description} onChange={(e) => handleInput(e, setPersonalForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
                 <div className="flex gap-2">
                   <div className="flex-1"><label className="block text-[10px] font-bold text-slate-500">Amount (₹)</label><input type="number" name="amount" value={personalForm.amount} onChange={(e) => handleInput(e, setPersonalForm)} step="0.01" required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
                   <div className="flex-1"><label className="block text-[10px] font-bold text-slate-500">Date</label><input type="date" name="date" value={personalForm.date} onChange={(e) => handleInput(e, setPersonalForm)} required className="w-full p-2 text-sm border rounded bg-slate-50 outline-none"/></div>
@@ -370,21 +405,39 @@
                 </div>
               ))}
 
+              {/* KHATA LIST WITH SMART SETTLEMENT POPUP */}
               {activeFeedTab === 'dues' && dues.map(d => (
-                <div key={d.id} className="flex justify-between items-center p-3 rounded-lg border border-slate-100 bg-white">
-                  <div>
-                    <span className={`text-[10px] uppercase font-bold ${d.type === 'take' ? 'text-emerald-500' : 'text-rose-500'}`}>{d.type === 'take' ? 'To Take' : 'To Give'}</span>
-                    <h4 className="font-bold text-sm text-slate-900">{d.personName}</h4>
-                    <p className="text-[10px] text-slate-500">{formatDate(d.date || d.timestamp)}</p>
+                <div key={d.id} className="p-3 rounded-lg border border-slate-100 bg-white">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className={`text-[10px] uppercase font-bold ${d.type === 'take' ? 'text-emerald-500' : 'text-rose-500'}`}>{d.type === 'take' ? 'To Take' : 'To Give'}</span>
+                      <h4 className="font-bold text-sm text-slate-900">{d.personName}</h4>
+                      <p className="text-[10px] text-slate-500">{formatDate(d.date || d.timestamp)}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`font-bold text-sm ${d.type === 'take' ? 'text-emerald-600' : 'text-rose-600'}`}>{formatINR(d.amount)}</span>
+                      {settlingDue !== d.id ? (
+                        <button onClick={() => setSettlingDue(d.id)} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded">Clear</button>
+                      ) : (
+                        <button onClick={() => setSettlingDue(null)} className="text-[10px] font-bold bg-slate-200 text-slate-600 px-2 py-1.5 rounded"><i className="fa-solid fa-xmark"></i></button>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`font-bold text-sm ${d.type === 'take' ? 'text-emerald-600' : 'text-rose-600'}`}>{formatINR(d.amount)}</span>
-                    <button onClick={() => setDues(dues.filter(item => item.id !== d.id))} className="text-[10px] font-bold bg-slate-100 text-slate-600 px-3 py-1.5 rounded">Clear</button>
-                  </div>
+                  
+                  {/* The popup asking where the money should go */}
+                  {settlingDue === d.id && (
+                    <div className="mt-3 pt-3 border-t border-slate-100 animate-in fade-in">
+                      <p className="text-[10px] font-bold text-slate-500 mb-2 text-center">Where should this money go?</p>
+                      <div className="flex gap-2">
+                        <button onClick={() => handleClearDue(d, 'amit')} className="flex-1 py-1.5 bg-slate-800 text-white text-[10px] font-bold rounded">Amit's Wallet</button>
+                        <button onClick={() => handleClearDue(d, 'business')} className="flex-1 py-1.5 bg-indigo-100 text-indigo-700 text-[10px] font-bold rounded">Business</button>
+                        <button onClick={() => handleClearDue(d, 'delete')} className="flex-1 py-1.5 bg-rose-50 text-rose-600 text-[10px] font-bold rounded">Just Delete</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
 
-              {/* AMIT PERSONAL FEED */}
               {activeFeedTab === 'personal' && personalEntries.map(p => (
                 <div key={p.id} className="flex justify-between items-center p-3 rounded-lg border border-slate-100 bg-slate-800 text-white">
                   <div>
@@ -408,15 +461,13 @@
             </div>
           </div>
 
-          {/* BACKUP AND RESTORE SECTION */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 mt-4 text-center">
             <h3 className="text-xs font-bold text-slate-500 mb-3 uppercase tracking-widest">Data Backup & Restore</h3>
-            <p className="text-[10px] text-slate-400 mb-3">Download your records safely to your phone, or upload a previous backup.</p>
             <div className="flex gap-3 justify-center">
-               <button onClick={exportData} className="flex-1 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-200 transition-colors">
+               <button onClick={exportData} className="flex-1 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-200">
                   <i className="fa-solid fa-download mr-1"></i> Save Backup
                </button>
-               <label className="flex-1 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-100 transition-colors">
+               <label className="flex-1 py-2 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-100">
                   <i className="fa-solid fa-upload mr-1"></i> Upload Data
                   <input type="file" accept=".json" onChange={importData} className="hidden" />
                </label>
